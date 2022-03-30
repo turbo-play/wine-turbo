@@ -50,6 +50,7 @@
 
 #include "unix_private.h"
 #include "fsync.h"
+#include <linux/futex.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(fsync);
 
