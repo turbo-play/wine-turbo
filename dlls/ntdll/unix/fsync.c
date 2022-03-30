@@ -39,7 +39,6 @@
 # include <sys/syscall.h>
 #endif
 #include <unistd.h>
-#include <stdint.h>
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -55,34 +54,16 @@
 WINE_DEFAULT_DEBUG_CHANNEL(fsync);
 
 #include "pshpack4.h"
-#include "poppack.h"
-
-#define FUTEX_WAIT_BITSET	9
-#define FUTEX_CLOCK_REALTIME	256
-#define FUTEX_BITSET_MATCH_ANY	0xffffffff
-
-/* futex_waitv interface */
-
-#ifndef __NR_futex_waitv
-
-# define __NR_futex_waitv 449
-# define FUTEX_32 2
-struct futex_waitv {
-    uint64_t   val;
-    uint64_t   uaddr;
-    uint32_t   flags;
-    uint32_t __reserved;
-};
-
-#endif
-
-#define u64_to_ptr(x) (void *)(uintptr_t)(x)
-
-struct timespec64
+struct futex_wait_block
 {
-    long long tv_sec;
-    long long tv_nsec;
+    int *addr;
+#if __SIZEOF_POINTER__ == 4
+    int pad;
+#endif
+    int val;
+    int bitset;
 };
+#include "poppack.h"
 
 static inline void small_pause(void)
 {
@@ -104,41 +85,20 @@ static LONGLONG update_timeout( ULONGLONG end )
     return timeleft;
 }
 
-static inline void futex_vector_set( struct futex_waitv *waitv, int *addr, int val )
-{
-    waitv->uaddr = (uintptr_t) addr;
-    waitv->val = val;
-    waitv->flags = FUTEX_32;
-    waitv->__reserved = 0;
-}
-
-static void simulate_sched_quantum(void)
-{
-    LARGE_INTEGER now;
-    ULONG64 wait_end;
-
-    if (!fsync_simulate_sched_quantum) return;
-
-    NtQuerySystemTime( &now );
-    wait_end = (now.QuadPart / 10 + 499) / 500;
-    usleep( wait_end * 500 - (now.QuadPart / 10) );
-}
-
-static inline int futex_wait_multiple( const struct futex_waitv *futexes,
+static inline int futex_wait_multiple( const struct futex_wait_block *futexes,
         int count, const ULONGLONG *end )
 {
    if (end)
    {
-        struct timespec64 timeout;
-        ULONGLONG tmp = *end - SECS_1601_TO_1970 * TICKSPERSEC;
-        timeout.tv_sec = tmp / (ULONGLONG)TICKSPERSEC;
-        timeout.tv_nsec = (tmp % TICKSPERSEC) * 100;
-
-        return syscall( __NR_futex_waitv, futexes, count, 0, &timeout, CLOCK_REALTIME );
+        LONGLONG timeleft = update_timeout( *end );
+        struct timespec timeout;
+        timeout.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
+        timeout.tv_nsec = (timeleft % TICKSPERSEC) * 100;
+        return syscall( __NR_futex, futexes, 31, count, timeout, 0, 0 );
    }
    else
    {
-        return syscall( __NR_futex_waitv, futexes, count, 0, NULL, 0 );
+        return syscall( __NR_futex, futexes, 31, count, NULL, 0, 0 );
    }
 }
 
@@ -151,13 +111,11 @@ static inline int futex_wait( int *addr, int val, const ULONGLONG *end )
 {
     if (end)
     {
+        LONGLONG timeleft = update_timeout( *end );
         struct timespec timeout;
-        ULONGLONG tmp = *end - SECS_1601_TO_1970 * TICKSPERSEC;
-        timeout.tv_sec = tmp / (ULONGLONG)TICKSPERSEC;
-        timeout.tv_nsec = (tmp % TICKSPERSEC) * 100;
-
-        return syscall( __NR_futex, addr, FUTEX_WAIT_BITSET | FUTEX_CLOCK_REALTIME,
-			val, &timeout, 0, FUTEX_BITSET_MATCH_ANY );
+        timeout.tv_sec = timeleft / (ULONGLONG)TICKSPERSEC;
+        timeout.tv_nsec = (timeleft % TICKSPERSEC) * 100;
+        return syscall( __NR_futex, addr, 0, val, &timeout, 0, 0 );
     }
     else
     {
@@ -174,15 +132,8 @@ int do_fsync(void)
 
     if (do_fsync_cached == -1)
     {
-        FILE *f;
-        if ((f = fopen( "/sys/kernel/futex2/wait", "r" )))
-        {
-            fclose(f);
-            do_fsync_cached = 0;
-            return do_fsync_cached;
-        }
-
-        syscall( __NR_futex_waitv, NULL, 0, 0, NULL, 0 );
+        static const struct timespec zero;
+        futex_wait_multiple( NULL, 0, &zero );
         do_fsync_cached = getenv("WINEFSYNC") && atoi(getenv("WINEFSYNC")) && errno != ENOSYS;
         if (getenv("WINEFSYNC_SPINCOUNT"))
             spincount = atoi(getenv("WINEFSYNC_SPINCOUNT"));
@@ -732,13 +683,19 @@ static NTSTATUS do_single_wait( int *addr, int val, ULONGLONG *end, BOOLEAN aler
     if (alertable)
     {
         int *apc_futex = ntdll_get_thread_data()->fsync_apc_futex;
-        struct futex_waitv futexes[2];
+        struct futex_wait_block futexes[2];
 
         if (__atomic_load_n( apc_futex, __ATOMIC_SEQ_CST ))
             return STATUS_USER_APC;
 
-        futex_vector_set( &futexes[0], addr, val );
-        futex_vector_set( &futexes[1], apc_futex, 0 );
+        futexes[0].addr = addr;
+        futexes[0].val = val;
+        futexes[1].addr = apc_futex;
+        futexes[1].val = 0;
+#if __SIZEOF_POINTER__ == 4
+        futexes[0].pad = futexes[1].pad = 0;
+#endif
+        futexes[0].bitset = futexes[1].bitset = ~0;
 
         ret = futex_wait_multiple( futexes, 2, end );
 
@@ -763,10 +720,10 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
 {
     static const LARGE_INTEGER zero = {0};
 
-    struct futex_waitv futexes[MAXIMUM_WAIT_OBJECTS + 1];
+    struct futex_wait_block futexes[MAXIMUM_WAIT_OBJECTS + 1];
     struct fsync *objs[MAXIMUM_WAIT_OBJECTS];
-    BOOL msgwait = FALSE, waited = FALSE;
     int has_fsync = 0, has_server = 0;
+    BOOL msgwait = FALSE;
     int dummy_futex = 0;
     unsigned int spin;
     LONGLONG timeleft;
@@ -888,13 +845,13 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                                     && __sync_val_compare_and_swap( &semaphore->count, current, current - 1 ) == current)
                             {
                                 TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-                                if (waited) simulate_sched_quantum();
                                 return i;
                             }
                             small_pause();
                         }
 
-                        futex_vector_set( &futexes[i], &semaphore->count, 0 );
+                        futexes[i].addr = &semaphore->count;
+                        futexes[i].val = 0;
                         break;
                     }
                     case FSYNC_MUTEX:
@@ -906,7 +863,6 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                         {
                             TRACE("Woken up by handle %p [%d].\n", handles[i], i);
                             mutex->count++;
-                            if (waited) simulate_sched_quantum();
                             return i;
                         }
 
@@ -916,7 +872,6 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                             {
                                 TRACE("Woken up by handle %p [%d].\n", handles[i], i);
                                 mutex->count = 1;
-                                if (waited) simulate_sched_quantum();
                                 return i;
                             }
                             else if (tid == ~0 && (tid = __sync_val_compare_and_swap( &mutex->tid, ~0, GetCurrentThreadId() )) == ~0)
@@ -928,7 +883,8 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                             small_pause();
                         }
 
-                        futex_vector_set( &futexes[i], &mutex->tid, tid );
+                        futexes[i].addr = &mutex->tid;
+                        futexes[i].val  = tid;
                         break;
                     }
                     case FSYNC_AUTO_EVENT:
@@ -940,17 +896,14 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                         {
                             if (__sync_val_compare_and_swap( &event->signaled, 1, 0 ))
                             {
-                                if (ac_odyssey && alertable)
-                                    usleep( 0 );
-
                                 TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-                                if (waited) simulate_sched_quantum();
                                 return i;
                             }
                             small_pause();
                         }
 
-                        futex_vector_set( &futexes[i], &event->signaled, 0 );
+                        futexes[i].addr = &event->signaled;
+                        futexes[i].val = 0;
                         break;
                     }
                     case FSYNC_MANUAL_EVENT:
@@ -963,17 +916,14 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                         {
                             if (__atomic_load_n( &event->signaled, __ATOMIC_SEQ_CST ))
                             {
-                                if (ac_odyssey && alertable)
-                                    usleep( 0 );
-
                                 TRACE("Woken up by handle %p [%d].\n", handles[i], i);
-                                if (waited) simulate_sched_quantum();
                                 return i;
                             }
                             small_pause();
                         }
 
-                        futex_vector_set( &futexes[i], &event->signaled, 0 );
+                        futexes[i].addr = &event->signaled;
+                        futexes[i].val = 0;
                         break;
                     }
                     default:
@@ -984,21 +934,30 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                 else
                 {
                     /* Avoid breaking things entirely. */
-                    futex_vector_set( &futexes[i], &dummy_futex, dummy_futex );
+                    futexes[i].addr = &dummy_futex;
+                    futexes[i].val = dummy_futex;
                 }
+
+#if __SIZEOF_POINTER__ == 4
+                futexes[i].pad = 0;
+#endif
+                futexes[i].bitset = ~0;
             }
 
             if (alertable)
             {
                 /* We already checked if it was signaled; don't bother doing it again. */
-                futex_vector_set( &futexes[i++], ntdll_get_thread_data()->fsync_apc_futex, 0 );
+                futexes[i].addr = ntdll_get_thread_data()->fsync_apc_futex;
+                futexes[i].val = 0;
+#if __SIZEOF_POINTER__ == 4
+                futexes[i].pad = 0;
+#endif
+                futexes[i].bitset = ~0;
+                i++;
             }
             waitcount = i;
 
             /* Looks like everything is contended, so wait. */
-
-            if (ac_odyssey && alertable)
-                usleep( 0 );
 
             if (timeout && !timeout->QuadPart)
             {
@@ -1009,7 +968,7 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
             }
 
             if (waitcount == 1)
-                ret = futex_wait( u64_to_ptr(futexes[0].uaddr), futexes[0].val, timeout ? &end : NULL );
+                ret = futex_wait( futexes[0].addr, futexes[0].val, timeout ? &end : NULL );
             else
                 ret = futex_wait_multiple( futexes, waitcount, timeout ? &end : NULL );
 
@@ -1022,7 +981,6 @@ static NTSTATUS __fsync_wait_objects( DWORD count, const HANDLE *handles,
                 TRACE("Wait timed out.\n");
                 return STATUS_TIMEOUT;
             }
-            else waited = TRUE;
         } /* while (1) */
     }
     else
