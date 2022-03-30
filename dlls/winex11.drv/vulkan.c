@@ -41,9 +41,11 @@
 #include "wine/vulkan_driver.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
-
-#ifdef SONAME_LIBVULKAN
 WINE_DECLARE_DEBUG_CHANNEL(fps);
+
+#ifndef SONAME_LIBVULKAN
+#define SONAME_LIBVULKAN ""
+#endif
 
 static CRITICAL_SECTION context_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -121,9 +123,17 @@ static void *vulkan_handle;
 
 static BOOL WINAPI wine_vk_init(INIT_ONCE *once, void *param, void **context)
 {
-    if (!(vulkan_handle = dlopen(SONAME_LIBVULKAN, RTLD_NOW)))
+    const char *libvulkan_candidates[] = {SONAME_LIBVULKAN,
+                                          "libvulkan.so.1",
+                                          "libvulkan.so",
+                                          NULL};
+    int i;
+    for (i=0; libvulkan_candidates[i] && !vulkan_handle; i++)
+        vulkan_handle = dlopen(libvulkan_candidates[i], RTLD_NOW);
+
+    if (!vulkan_handle)
     {
-        ERR("Failed to load %s.\n", SONAME_LIBVULKAN);
+        ERR("Failed to load vulkan library\n");
         return TRUE;
     }
 
@@ -1058,28 +1068,3 @@ const struct vulkan_funcs *get_vulkan_driver(UINT version)
     return NULL;
 }
 
-#else /* No vulkan */
-
-const struct vulkan_funcs *get_vulkan_driver(UINT version)
-{
-    ERR("Wine was built without Vulkan support.\n");
-    return NULL;
-}
-
-void destroy_vk_surface(HWND hwnd)
-{
-}
-
-void resize_vk_surfaces(HWND hwnd, Window active, int mask, XWindowChanges changes)
-{
-}
-
-void sync_vk_surface(HWND hwnd, BOOL known_child)
-{
-}
-
-void vulkan_thread_detach(void)
-{
-}
-
-#endif /* SONAME_LIBVULKAN */

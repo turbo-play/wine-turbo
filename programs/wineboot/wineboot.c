@@ -78,6 +78,7 @@
 #include <shlwapi.h>
 #include <shellapi.h>
 #include <setupapi.h>
+#include <wininet.h>
 #include <newdev.h>
 #include "resource.h"
 
@@ -901,6 +902,13 @@ static void create_volatile_environment_registry_key(void)
 
     set_reg_value( hkey, L"SESSIONNAME", L"Console" );
     RegCloseKey( hkey );
+}
+
+static void create_proxy_settings(void)
+{
+    HINTERNET inet;
+    inet = InternetOpenA( "Wine", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0 );
+    if (inet) InternetCloseHandle( inet );
 }
 
 /* Performs the rename operations dictated in %SystemRoot%\Wininit.ini.
@@ -1798,6 +1806,7 @@ int __cdecl main( int argc, char *argv[] )
 
     create_digitalproductid();
     create_volatile_environment_registry_key();
+    create_proxy_settings();
 
     ProcessRunKeys( HKEY_LOCAL_MACHINE, L"RunOnce", TRUE, TRUE );
 

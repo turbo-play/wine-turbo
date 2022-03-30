@@ -1,0 +1,10 @@
+--- dlls/ntdll/tests/exception.c
++++ dlls/ntdll/tests/exception.c
+@@ -8343,7 +8343,6 @@ static void test_outputdebugstring(DWORD numexc, BOOL todo)
+     outputdebugstring_exceptions = 0;
+     OutputDebugStringA("Hello World");
+ 
+-    todo_wine_if(todo)
+     ok(outputdebugstring_exceptions == numexc, "OutputDebugStringA generated %ld exceptions, expected %ld\n",
+        outputdebugstring_exceptions, numexc);
+ 
