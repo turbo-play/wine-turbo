@@ -27,8 +27,11 @@
 #include "wine/list.h"
 #include "nvapi.h"
 #include "d3d9.h"
+#include "d3d11.h"
+#include "initguid.h"
 
 #include "wine/wined3d.h"
+#include "wine/winedxgi.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(nvapi);
 
@@ -660,6 +663,296 @@ static NvAPI_Status CDECL NvAPI_GPU_GetVirtualFrameBufferSize(NvPhysicalGpuHandl
     return NVAPI_OK;
 }
 
+static NvAPI_Status CDECL NvAPI_GPU_GetGpuCoreCount(NvPhysicalGpuHandle hPhysicalGpu, NvU32 *pCount)
+{
+    TRACE("(%p, %p)\n", hPhysicalGpu, pCount);
+
+    if (!hPhysicalGpu)
+        return NVAPI_EXPECTED_PHYSICAL_GPU_HANDLE;
+
+    if (hPhysicalGpu != FAKE_PHYSICAL_GPU)
+    {
+        FIXME("invalid handle: %p\n", hPhysicalGpu);
+        return NVAPI_INVALID_HANDLE;
+    }
+
+    if (!pCount)
+        return NVAPI_INVALID_ARGUMENT;
+
+    *pCount = 1;
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_D3D11_SetDepthBoundsTest(IUnknown *unk, NvU32 enable, float min, float max)
+{
+    struct wined3d_device_context *wined3d_context;
+    IWineD3DDeviceContext *context;
+    HRESULT hr;
+
+    TRACE("unk %p, enable %u, min %.8e, max %.8e.\n", unk, enable, min, max);
+
+    if (!unk)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (FAILED(hr = IUnknown_QueryInterface(unk, &IID_IWineD3DDeviceContext, (void **)&context)))
+    {
+        ERR("Failed to retrieve IWineD3DDeviceContext interface, hr %#x.\n", hr);
+        return NVAPI_ERROR;
+    }
+    wined3d_context = IWineD3DDeviceContext_get_wined3d_device_context(context);
+
+    wined3d_mutex_lock();
+    wined3d_device_context_set_depth_bounds(wined3d_context, enable, min, max);
+    wined3d_mutex_unlock();
+
+    IWineD3DDeviceContext_Release(context);
+    return NVAPI_OK;
+}
+
+static NVAPI_DEVICE_FEATURE_LEVEL translate_feature_level(D3D_FEATURE_LEVEL level_d3d)
+{
+    switch (level_d3d)
+    {
+        case D3D_FEATURE_LEVEL_9_1:
+        case D3D_FEATURE_LEVEL_9_2:
+        case D3D_FEATURE_LEVEL_9_3:
+            return NVAPI_DEVICE_FEATURE_LEVEL_NULL;
+        case D3D_FEATURE_LEVEL_10_0:
+            return NVAPI_DEVICE_FEATURE_LEVEL_10_0;
+        case D3D_FEATURE_LEVEL_10_1:
+            return NVAPI_DEVICE_FEATURE_LEVEL_10_1;
+        case D3D_FEATURE_LEVEL_11_0:
+        default:
+            return NVAPI_DEVICE_FEATURE_LEVEL_11_0;
+    }
+}
+
+static NvAPI_Status CDECL NvAPI_D3D11_CreateDevice(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags,
+                                                   const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version,
+                                                   ID3D11Device **device_out, D3D_FEATURE_LEVEL *obtained_feature_level,
+                                                   ID3D11DeviceContext **immediate_context, NVAPI_DEVICE_FEATURE_LEVEL *supported)
+{
+    D3D_FEATURE_LEVEL level;
+    HRESULT hr;
+
+    hr = D3D11CreateDevice(adapter, driver_type, swrast, flags, feature_levels, levels, sdk_version, device_out, &level, immediate_context);
+    if (FAILED(hr)) return NVAPI_ERROR;
+    if (obtained_feature_level) *obtained_feature_level = level;
+    if (supported) *supported = translate_feature_level(level);
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_D3D11_CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type,HMODULE swrast, UINT flags,
+                                                               const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version,
+                                                               const DXGI_SWAP_CHAIN_DESC *swapchain_desc, IDXGISwapChain **swapchain,
+                                                               ID3D11Device **device_out, D3D_FEATURE_LEVEL *obtained_feature_level,
+                                                               ID3D11DeviceContext **immediate_context, NVAPI_DEVICE_FEATURE_LEVEL *supported)
+{
+    D3D_FEATURE_LEVEL level;
+    HRESULT hr;
+
+    hr = D3D11CreateDeviceAndSwapChain(adapter, driver_type, swrast, flags, feature_levels, levels, sdk_version, swapchain_desc, swapchain,
+                                       device_out, &level, immediate_context);
+    if (FAILED(hr)) return NVAPI_ERROR;
+    if (obtained_feature_level) *obtained_feature_level = level;
+    if (supported) *supported = translate_feature_level(level);
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_EnumLogicalGPUs(NvLogicalGpuHandle gpuHandle[NVAPI_MAX_LOGICAL_GPUS], NvU32 *count)
+{
+    TRACE("(%p, %p)\n", gpuHandle, count);
+
+    if (!gpuHandle)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (!count)
+        return NVAPI_INVALID_POINTER;
+
+    gpuHandle[0] = FAKE_LOGICAL_GPU;
+    *count = 1;
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_EnumLogicalGPUs_unknown(NvLogicalGpuHandle gpuHandle[NVAPI_MAX_LOGICAL_GPUS], NvU32 *count)
+{
+    TRACE("(%p, %p)\n", gpuHandle, count);
+    return NvAPI_EnumLogicalGPUs(gpuHandle, count);
+}
+
+static NvAPI_Status CDECL NvAPI_GetPhysicalGPUsFromLogicalGPU(NvLogicalGpuHandle logicalGPU,
+                                                              NvPhysicalGpuHandle physicalGPUs[NVAPI_MAX_PHYSICAL_GPUS],
+                                                              NvU32 *count)
+{
+    if (!physicalGPUs)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (!count)
+        return NVAPI_INVALID_POINTER;
+
+    if (!logicalGPU)
+        return NVAPI_EXPECTED_LOGICAL_GPU_HANDLE;
+
+    if (logicalGPU != FAKE_LOGICAL_GPU)
+    {
+        FIXME("invalid handle: %p\n", logicalGPU);
+        return NVAPI_EXPECTED_LOGICAL_GPU_HANDLE;
+    }
+
+    physicalGPUs[0] = FAKE_PHYSICAL_GPU;
+    *count = 1;
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_EnumPhysicalGPUs(NvPhysicalGpuHandle gpuHandle[NVAPI_MAX_PHYSICAL_GPUS], NvU32 *count)
+{
+    TRACE("(%p, %p)\n", gpuHandle, count);
+
+    if (!gpuHandle)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (!count)
+        return NVAPI_INVALID_POINTER;
+
+    gpuHandle[0] = FAKE_PHYSICAL_GPU;
+    *count = 1;
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_GPU_GetFullName(NvPhysicalGpuHandle hPhysicalGpu, NvAPI_ShortString szName)
+{
+    NvAPI_ShortString adapter = {'G','e','F','o','r','c','e',' ','9','9','9',' ','G','T','X', 0};
+
+    TRACE("(%p, %p)\n", hPhysicalGpu, szName);
+
+    if (!hPhysicalGpu)
+        return NVAPI_EXPECTED_PHYSICAL_GPU_HANDLE;
+
+    if (hPhysicalGpu != FAKE_PHYSICAL_GPU)
+    {
+        FIXME("invalid handle: %p\n", hPhysicalGpu);
+        return NVAPI_INVALID_HANDLE;
+    }
+
+    if (!szName)
+        return NVAPI_INVALID_ARGUMENT;
+
+    memcpy(szName, adapter, sizeof(adapter));
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_EnumNvidiaDisplayHandle(NvU32 thisEnum, NvDisplayHandle *pNvDispHandle)
+{
+    TRACE("(%u, %p)\n", thisEnum, pNvDispHandle);
+
+    if (thisEnum >= NVAPI_MAX_DISPLAYS || !pNvDispHandle)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (thisEnum > 0)
+        return NVAPI_END_ENUMERATION;
+
+    *pNvDispHandle = FAKE_DISPLAY;
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_SYS_GetDriverAndBranchVersion(NvU32* pDriverVersion, NvAPI_ShortString szBuildBranchString)
+{
+    NvAPI_ShortString build_str = {'r','3','3','7','_','0','0',0};
+
+    TRACE("(%p, %p)\n", pDriverVersion, szBuildBranchString);
+
+    if (!pDriverVersion || !szBuildBranchString)
+        return NVAPI_INVALID_POINTER;
+
+    memcpy(szBuildBranchString, build_str, sizeof(build_str));
+    *pDriverVersion = 33788;
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_Unload(void)
+{
+    TRACE("()\n");
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_D3D_GetCurrentSLIState(IUnknown *pDevice, NV_GET_CURRENT_SLI_STATE *pSliState)
+{
+    TRACE("(%p, %p)\n", pDevice, pSliState);
+
+    if (!pDevice || !pSliState)
+        return NVAPI_INVALID_ARGUMENT;
+
+    if (pSliState->version != NV_GET_CURRENT_SLI_STATE_VER1 &&
+        pSliState->version != NV_GET_CURRENT_SLI_STATE_VER2)
+        return NVAPI_INCOMPATIBLE_STRUCT_VERSION;
+
+    /* Simulate single GPU */
+    pSliState->maxNumAFRGroups = 1;
+    pSliState->numAFRGroups = 1;
+    pSliState->currentAFRIndex = 0;
+    pSliState->nextFrameAFRIndex = 0;
+    pSliState->previousFrameAFRIndex = 0;
+    pSliState->bIsCurAFRGroupNew = FALSE;
+
+    /* No VR SLI */
+    if (pSliState->version == NV_GET_CURRENT_SLI_STATE_VER2)
+        pSliState->numVRSLIGpus = 0;
+
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_GetLogicalGPUFromDisplay(NvDisplayHandle hNvDisp, NvLogicalGpuHandle *pLogicalGPU)
+{
+    TRACE("(%p, %p)\n", hNvDisp, pLogicalGPU);
+
+    if (!pLogicalGPU)
+        return NVAPI_INVALID_POINTER;
+
+    if (hNvDisp && hNvDisp != FAKE_DISPLAY)
+        return NVAPI_NVIDIA_DEVICE_NOT_FOUND;
+
+    *pLogicalGPU = FAKE_LOGICAL_GPU;
+    return NVAPI_OK;
+}
+
+static NvAPI_Status CDECL NvAPI_D3D_GetObjectHandleForResource(IUnknown *pDevice, IUnknown *pResource, NVDX_ObjectHandle *pHandle)
+{
+    FIXME("(%p, %p, %p): stub\n", pDevice, pResource, pHandle);
+    return NVAPI_ERROR;
+}
+
+static NvAPI_Status CDECL NvAPI_D3D9_RegisterResource(IDirect3DResource9* pResource)
+{
+    FIXME("(%p): stub\n", pResource);
+    return NVAPI_ERROR;
+}
+
+static NvAPI_Status CDECL NvAPI_GPU_GetGpuCoreCount(NvPhysicalGpuHandle hPhysicalGpu, NvU32 *pCount)
+{
+    TRACE("(%p, %p)\n", hPhysicalGpu, pCount);
+
+    if (!hPhysicalGpu)
+        return NVAPI_EXPECTED_PHYSICAL_GPU_HANDLE;
+
+    if (hPhysicalGpu != FAKE_PHYSICAL_GPU)
+    {
+        FIXME("invalid handle: %p\n", hPhysicalGpu);
+        return NVAPI_INVALID_HANDLE;
+    }
+
+    if (!pCount)
+        return NVAPI_INVALID_ARGUMENT;
+
+    *pCount = 1;
+    return NVAPI_OK;
+}
+
 void* CDECL nvapi_QueryInterface(unsigned int offset)
 {
     static const struct
@@ -704,6 +997,10 @@ void* CDECL nvapi_QueryInterface(unsigned int offset)
         {0xa064bdfc, NvAPI_D3D9_RegisterResource},
         {0x46fbeb03, NvAPI_GPU_GetPhysicalFrameBufferSize},
         {0x5a04b644, NvAPI_GPU_GetVirtualFrameBufferSize},
+        {0xc7026a87, NvAPI_GPU_GetGpuCoreCount},
+        {0x7aaf7a04, NvAPI_D3D11_SetDepthBoundsTest},
+        {0x6a16d3a0, NvAPI_D3D11_CreateDevice},
+        {0xbb939ee5, NvAPI_D3D11_CreateDeviceAndSwapChain},
     };
     unsigned int i;
     TRACE("(%x)\n", offset);

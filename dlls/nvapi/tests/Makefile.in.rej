@@ -1,0 +1,9 @@
+--- dlls/nvapi/tests/Makefile.in
++++ dlls/nvapi/tests/Makefile.in
+@@ -1,5 +1,5 @@
+ TESTDLL   = nvapi.dll
+-IMPORTS   = user32 shlwapi
++IMPORTS   = user32 shlwapi d3d9
+ 
+ C_SRCS = \
+ 	nvapi.c

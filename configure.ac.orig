@@ -3192,11 +3192,14 @@ WINE_CONFIG_MAKEFILE(dlls/ntoskrnl.exe/tests)
 WINE_CONFIG_MAKEFILE(dlls/ntprint)
 WINE_CONFIG_MAKEFILE(dlls/ntprint/tests)
 <<<<<<< HEAD
+<<<<<<< HEAD
 WINE_CONFIG_MAKEFILE(dlls/nvapi,enable_win32)
 WINE_CONFIG_MAKEFILE(dlls/nvapi/tests)
 WINE_CONFIG_MAKEFILE(dlls/nvapi64,enable_win64)
 WINE_CONFIG_MAKEFILE(dlls/nvcuda)
 WINE_CONFIG_MAKEFILE(dlls/nvcuda/tests)
+=======
+>>>>>>> parent of fdfb4b925f5 (nvcuda: Add stub DLL)
 =======
 >>>>>>> parent of fdfb4b925f5 (nvcuda: Add stub DLL)
 WINE_CONFIG_MAKEFILE(dlls/objsel)
@@ -3449,6 +3452,7 @@ WINE_CONFIG_MAKEFILE(dlls/windows.media.devices)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.devices/tests)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech)
 WINE_CONFIG_MAKEFILE(dlls/windows.media.speech/tests)
+WINE_CONFIG_MAKEFILE(dlls/windows.networking.connectivity)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecs/tests)
 WINE_CONFIG_MAKEFILE(dlls/windowscodecsext)

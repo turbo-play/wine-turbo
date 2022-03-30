@@ -25,6 +25,9 @@
 /* Define to 1 if you have the <asm/user.h> header file. */
 #undef HAVE_ASM_USER_H
 
+/* Define to 1 if you have the <attr/xattr.h> header file. */
+#undef HAVE_ATTR_XATTR_H
+
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -592,6 +595,9 @@
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
+/* Define to 1 if you have the <sys/extattr.h> header file. */
+#undef HAVE_SYS_EXTATTR_H
+
 /* Define to 1 if you have the <sys/filio.h> header file. */
 #undef HAVE_SYS_FILIO_H
 
@@ -696,6 +702,9 @@
 
 /* Define to 1 if you have the <sys/vnode.h> header file. */
 #undef HAVE_SYS_VNODE_H
+
+/* Define to 1 if you have the <sys/xattr.h> header file. */
+#undef HAVE_SYS_XATTR_H
 
 /* Define to 1 if you have the `tcdrain' function. */
 #undef HAVE_TCDRAIN
@@ -915,6 +924,9 @@
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
+
+/* Define if xattr functions take additional arguments (Mac OS X) */
+#undef XATTR_ADDITIONAL_OPTIONS
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING

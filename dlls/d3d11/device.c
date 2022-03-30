@@ -6630,6 +6630,49 @@ static const struct IWineD3DDeviceContextVtbl device_d3d_device_context_vtbl =
     device_d3d_device_context_get_wined3d_device_context,
 };
 
+/* IWineD3DDeviceContext methods */
+
+static inline struct d3d_device *device_from_IWineD3DDeviceContext(IWineD3DDeviceContext *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_device, IWineD3DDeviceContext_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE device_d3d_device_context_QueryInterface(IWineD3DDeviceContext *iface,
+        REFIID iid, void **out)
+{
+    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
+    return IUnknown_QueryInterface(device->outer_unk, iid, out);
+}
+
+static ULONG STDMETHODCALLTYPE device_d3d_device_context_AddRef(IWineD3DDeviceContext *iface)
+{
+    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
+    return IUnknown_AddRef(device->outer_unk);
+}
+
+static ULONG STDMETHODCALLTYPE device_d3d_device_context_Release(IWineD3DDeviceContext *iface)
+{
+    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
+    return IUnknown_Release(device->outer_unk);
+}
+
+static struct wined3d_device_context * STDMETHODCALLTYPE device_d3d_device_context_get_wined3d_device_context(
+        IWineD3DDeviceContext *iface)
+{
+    struct d3d_device *device = device_from_IWineD3DDeviceContext(iface);
+    return device->immediate_context.wined3d_context;
+}
+
+static const struct IWineD3DDeviceContextVtbl device_d3d_device_context_vtbl =
+{
+    /* IUnknown methods */
+    device_d3d_device_context_QueryInterface,
+    device_d3d_device_context_AddRef,
+    device_d3d_device_context_Release,
+    /* IWineD3DDeviceContext methods */
+    device_d3d_device_context_get_wined3d_device_context,
+};
+
 /* IWineDXGIDeviceParent IUnknown methods */
 
 static inline struct d3d_device *device_from_dxgi_device_parent(IWineDXGIDeviceParent *iface)

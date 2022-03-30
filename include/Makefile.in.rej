@@ -1,0 +1,10 @@
+--- include/Makefile.in
++++ include/Makefile.in
+@@ -555,6 +555,7 @@ SOURCES = \
+ 	ntsecpkg.h \
+ 	ntstatus.h \
+ 	ntuser.h \
++	nvapi.h \
+ 	oaidl.idl \
+ 	objbase.h \
+ 	objectarray.idl \

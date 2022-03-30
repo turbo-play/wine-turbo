@@ -1096,20 +1096,6 @@ static void test_NvAPI_SYS_GetDriverAndBranchVersion(void)
 }
 
 
-static void test_NvAPI_D3D11_SetDepthBoundsTest(void)
-{
-    NvAPI_Status status;
-
-    if (!pNvAPI_D3D11_SetDepthBoundsTest)
-    {
-        win_skip("NvAPI_D3D11_SetDepthBoundsTest export not found.\n");
-        return;
-    }
-
-    status = pNvAPI_D3D11_SetDepthBoundsTest(NULL, 0, 0.0, 0.0);
-    ok(status == NVAPI_INVALID_ARGUMENT, "Expected status NVAPI_INVALID_ARGUMENT, got %d\n", status);
-}
-
 START_TEST( nvapi )
 {
     WNDCLASSA wc = {0};

@@ -1930,6 +1930,14 @@ void CDECL wined3d_device_context_set_depth_bounds(struct wined3d_device_context
     wined3d_device_context_emit_set_depth_bounds(context, enable, min, max);
 }
 
+static void wined3d_device_context_set_depth_bounds(struct wined3d_device_context *context,
+        BOOL enable, float min, float max)
+{
+    TRACE("context %p, enable %d, min %.8e, max %.8e.\n", context, enable, min, max);
+
+    wined3d_device_context_emit_set_depth_bounds(context, enable, min, max);
+}
+
 void CDECL wined3d_device_context_set_viewports(struct wined3d_device_context *context, unsigned int viewport_count,
         const struct wined3d_viewport *viewports)
 {
@@ -3980,6 +3988,20 @@ void CDECL wined3d_device_apply_stateblock(struct wined3d_device *device,
                 wined3d_depth_stencil_state_decref(depth_stencil_state);
             }
         }
+    }
+
+    if (set_depth_bounds)
+    {
+        union
+        {
+            DWORD d;
+            float f;
+        } zmin, zmax;
+
+        zmin.d = state->rs[WINED3D_RS_ADAPTIVETESS_Z];
+        zmax.d = state->rs[WINED3D_RS_ADAPTIVETESS_W];
+        wined3d_device_context_set_depth_bounds(context,
+                state->rs[WINED3D_RS_ADAPTIVETESS_X] == WINED3DFMT_NVDB, zmin.f, zmax.f);
     }
 
     if (set_depth_bounds)

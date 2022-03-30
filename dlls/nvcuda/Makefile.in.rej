@@ -1,0 +1,9 @@
+--- dlls/nvcuda/Makefile.in
++++ dlls/nvcuda/Makefile.in
+@@ -1,5 +1,6 @@
+ MODULE    = nvcuda.dll
+ EXTRADLLFLAGS = -mcygwin
++EXTRALIBS = $(PTHREAD_LIBS)
+ 
+ C_SRCS = \
+ 	internal.c \
